@@ -65,6 +65,10 @@
   .tab-btn.active{color:#0f172a;border-bottom-color:#2563eb}
   .toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#111827;color:#fff;padding:12px 14px;border-radius:12px;font-size:14px;font-weight:800;opacity:0;pointer-events:none;transition:.18s;z-index:600}
   .toast.show{opacity:1}
+  .sheet-ov{position:fixed;inset:0;background:rgba(15,23,42,.34);display:none;z-index:520}
+  .sheet-ov.show{display:block}
+  .sheet{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top-left-radius:20px;border-top-right-radius:20px;box-shadow:0 -18px 48px rgba(15,23,42,.18);display:none;z-index:530;max-height:75vh;overflow:auto}
+  .sheet.show{display:block}
   .col-hidden{display:none !important}
   .check-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid #eef2f7}
   .check-row:last-child{border-bottom:none}
@@ -94,10 +98,12 @@
     .side{top:0;right:0;width:100vw!important;height:100vh!important;min-width:0;min-height:0;border-radius:0;max-width:none;max-height:none}
     .side-splitter{display:none}
     .desktop-actions{display:grid !important;grid-template-columns:1fr 1fr;gap:8px;width:100%}
+    .crm-filter-desktop{display:none !important}
+    .crm-mobile-filters{display:flex !important}
   }
 </style>
 </head>
-<body>>
+<body>
 <div class="shell">
   <div class="top-card p-4 md:p-5 mb-4">
     <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
@@ -148,11 +154,16 @@
     </div>
 
     <div class="card mb-4 p-3">
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-2">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-2 items-center">
         <input id="crmSearch" class="field" placeholder="Buscar por nombre, número o notas">
-        <select id="crmFilterDealer" class="field"><option value="">Todos los dealers</option></select>
-        <select id="crmFilterBirdog" class="field"><option value="">Todos los birdogs</option></select>
-        <select id="crmFilterEstado" class="field"><option value="">Todos los estados</option></select>
+        <div class="crm-filter-desktop grid grid-cols-1 md:grid-cols-3 gap-2 md:col-span-3">
+          <select id="crmFilterDealer" class="field"><option value="">Todos los dealers</option></select>
+          <select id="crmFilterBirdog" class="field"><option value="">Todos los birdogs</option></select>
+          <select id="crmFilterEstado" class="field"><option value="">Todos los estados</option></select>
+        </div>
+        <div class="crm-mobile-filters hidden md:hidden">
+          <button id="openCrmFilterSheetBtn" class="field text-left font-extrabold">Filtros</button>
+        </div>
       </div>
     </div>
 
@@ -253,6 +264,20 @@
       </div>
     </div>
   </section>
+</div>
+
+<div id="crmFilterSheetOv" class="sheet-ov"></div>
+<div id="crmFilterSheet" class="sheet">
+  <div class="p-4 border-b border-slate-200 flex items-center justify-between">
+    <div class="text-lg font-extrabold">Filtros CRM</div>
+    <button id="closeCrmFilterSheetBtn" class="w-10 h-10 rounded-md border border-slate-200 bg-white font-extrabold">✕</button>
+  </div>
+  <div class="p-4 space-y-3">
+    <div><label class="label">Dealer</label><select id="crmFilterDealerMobile" class="field"><option value="">Todos los dealers</option></select></div>
+    <div><label class="label">Birdog</label><select id="crmFilterBirdogMobile" class="field"><option value="">Todos los birdogs</option></select></div>
+    <div><label class="label">Estado</label><select id="crmFilterEstadoMobile" class="field"><option value="">Todos los estados</option></select></div>
+    <button id="applyCrmFilterSheetBtn" class="w-full px-4 py-3 rounded-md bg-blue-600 text-white font-extrabold">Aplicar filtros</button>
+  </div>
 </div>
 
 <div id="sideOverlay" class="overlay"></div>
@@ -524,6 +549,13 @@
   let realtimeSubscribed = false;
   let lastRemoteSavedAt = "";
   let realtimePollTimer = null;
+  const CLIENT_ID = (() => {
+    const key = "crm_pro_client_id_v1";
+    let id = sessionStorage.getItem(key) || localStorage.getItem(key);
+    if(!id){ id = "client_" + Math.random().toString(36).slice(2,10); localStorage.setItem(key, id); }
+    sessionStorage.setItem(key, id);
+    return id;
+  })();
 
   function initFirebaseBackup(){
     try{
@@ -541,7 +573,6 @@
 
   function buildBackupPayload(){
     return {
-      exportedAt: new Date().toISOString(),
       version: 1,
       leads,
       sales,
@@ -580,6 +611,7 @@
       firebaseDb.ref(FIREBASE_LIVE_DATA_PATH).set({
         reason,
         savedAt: stamp,
+        clientId: CLIENT_ID,
         data: buildBackupPayload()
       });
     }catch(err){
@@ -593,7 +625,8 @@
     if(!validateImportPayload(payload)) return;
 
     const remoteStamp = String(wrapper.savedAt || "");
-    if(remoteStamp && remoteStamp === lastRemoteSavedAt) return;
+    if(!remoteStamp) return;
+    if(remoteStamp === lastRemoteSavedAt) return;
 
     lastRemoteSavedAt = remoteStamp;
     suppressRemoteWrite = true;
@@ -602,7 +635,7 @@
       if($("syncStatus")) $("syncStatus").textContent = "Actualizado " + new Date().toLocaleTimeString("es-HN",{hour:"numeric",minute:"2-digit",second:"2-digit"});
       toast("Datos sincronizados en tiempo real.");
     } finally {
-      setTimeout(() => { suppressRemoteWrite = false; }, 200);
+      setTimeout(() => { suppressRemoteWrite = false; }, 300);
     }
   }
 
@@ -683,6 +716,7 @@
     renderSalesAll();
     applyCRMColumnWidths();
     applyVisibleColumns();
+    if($("leadSide").classList.contains("show") && selectedLeadId && !leads.find(x => x.id === selectedLeadId)) closeLeadSide();
     if(showToast) toast("Datos cargados correctamente.");
   }
 
@@ -1369,6 +1403,19 @@
     const opt = getOpt(type, value);
     return `<span class="pill" style="background:${opt.color}">${escapeHtml(opt.label)}</span>`;
   }
+  function syncCRMMobileFiltersFromDesktop(){
+    if($("crmFilterDealerMobile")) $("crmFilterDealerMobile").value = $("crmFilterDealer").value;
+    if($("crmFilterBirdogMobile")) $("crmFilterBirdogMobile").value = $("crmFilterBirdog").value;
+    if($("crmFilterEstadoMobile")) $("crmFilterEstadoMobile").value = $("crmFilterEstado").value;
+  }
+  function syncCRMDesktopFiltersFromMobile(){
+    if($("crmFilterDealerMobile")) $("crmFilterDealer").value = $("crmFilterDealerMobile").value;
+    if($("crmFilterBirdogMobile")) $("crmFilterBirdog").value = $("crmFilterBirdogMobile").value;
+    if($("crmFilterEstadoMobile")) $("crmFilterEstado").value = $("crmFilterEstadoMobile").value;
+  }
+  function openCrmFilterSheet(){ syncCRMMobileFiltersFromDesktop(); $("crmFilterSheetOv").classList.add("show"); $("crmFilterSheet").classList.add("show"); }
+  function closeCrmFilterSheet(){ $("crmFilterSheetOv").classList.remove("show"); $("crmFilterSheet").classList.remove("show"); }
+
   function populateCRMFilters(){
     const fill = (id, values, keep) => {
       const el = $(id);
@@ -1376,9 +1423,15 @@
       el.innerHTML = keep + values.map(v => `<option>${escapeHtml(v)}</option>`).join("");
       if(values.includes(current)) el.value = current;
     };
-    fill("crmFilterDealer", [...new Set(leads.map(x => x.dealer).filter(Boolean))].sort(), '<option value="">Todos los dealers</option>');
-    fill("crmFilterBirdog", [...new Set(leads.map(x => x.bridog).filter(Boolean))].sort(), '<option value="">Todos los birdogs</option>');
-    fill("crmFilterEstado", options.estado.map(o => o.label), '<option value="">Todos los estados</option>');
+    const dealers = [...new Set(leads.map(x => x.dealer).filter(Boolean))].sort();
+    const bridogs = [...new Set(leads.map(x => x.bridog).filter(Boolean))].sort();
+    const estados = options.estado.map(o => o.label);
+    fill("crmFilterDealer", dealers, '<option value="">Todos los dealers</option>');
+    fill("crmFilterBirdog", bridogs, '<option value="">Todos los birdogs</option>');
+    fill("crmFilterEstado", estados, '<option value="">Todos los estados</option>');
+    fill("crmFilterDealerMobile", dealers, '<option value="">Todos los dealers</option>');
+    fill("crmFilterBirdogMobile", bridogs, '<option value="">Todos los birdogs</option>');
+    fill("crmFilterEstadoMobile", estados, '<option value="">Todos los estados</option>');
   }
   function renderCRMAll(){
     populateCRMFilters();
@@ -1812,9 +1865,13 @@
     $("sale_propiedad").addEventListener("change", recalcSaleSplit);
 
     $("crmSearch").addEventListener("input", renderCRMTable);
-    $("crmFilterDealer").addEventListener("change", renderCRMTable);
-    $("crmFilterBirdog").addEventListener("change", renderCRMTable);
-    $("crmFilterEstado").addEventListener("change", () => { activeStateMetric = ""; activeDateMetric = ""; renderCRMAll(); });
+    $("crmFilterDealer").addEventListener("change", () => { syncCRMMobileFiltersFromDesktop(); renderCRMTable(); });
+    $("crmFilterBirdog").addEventListener("change", () => { syncCRMMobileFiltersFromDesktop(); renderCRMTable(); });
+    $("crmFilterEstado").addEventListener("change", () => { syncCRMMobileFiltersFromDesktop(); activeStateMetric = ""; activeDateMetric = ""; renderCRMAll(); });
+    if($("openCrmFilterSheetBtn")) $("openCrmFilterSheetBtn").onclick = openCrmFilterSheet;
+    if($("closeCrmFilterSheetBtn")) $("closeCrmFilterSheetBtn").onclick = closeCrmFilterSheet;
+    if($("crmFilterSheetOv")) $("crmFilterSheetOv").onclick = closeCrmFilterSheet;
+    if($("applyCrmFilterSheetBtn")) $("applyCrmFilterSheetBtn").onclick = () => { syncCRMDesktopFiltersFromMobile(); activeStateMetric = ""; activeDateMetric = ""; renderCRMAll(); closeCrmFilterSheet(); };
 
     qsa("[data-metric]").forEach(btn => btn.onclick = () => { activeStateMetric = ""; activeDateMetric = ""; renderCRMAll(); });
     qsa("[data-state]").forEach(btn => btn.onclick = () => { activeStateMetric = btn.dataset.state; activeDateMetric = ""; $("crmFilterEstado").value = ""; renderCRMAll(); });
@@ -1833,17 +1890,17 @@
     });
     document.addEventListener("keydown", (e) => {
       if(e.key === "Escape"){
-        closeLeadModal(); closeLeadSide(); closeSaleModal(); closeCustomModal(); closePhoneModal(); closeColsModal(); $("lightbox").classList.remove("show");
+        closeLeadModal(); closeLeadSide(); closeSaleModal(); closeCustomModal(); closePhoneModal(); closeColsModal(); if(typeof closeCrmFilterSheet==="function") closeCrmFilterSheet(); $("lightbox").classList.remove("show");
       }
     });
   }
 
   (async function startApp(){
-    const boot = await bootstrapRealtimeState();
     loadSavedLayout();
     bind();
     initCRMColumnResizers();
     initSideSplitter();
+    const boot = await bootstrapRealtimeState();
     renderCRMAll();
     renderSalesAll();
     resetLeadModal();
